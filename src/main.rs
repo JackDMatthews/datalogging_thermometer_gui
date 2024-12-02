@@ -7,6 +7,13 @@ struct SerialInputData {
     checked: Vec<bool>, // Stores the checked state of the checkboxes
 }
 
+impl SerialInputData {
+    fn save_to_csv(&self) {
+        // Save the data to a .CSV file
+        println!("Data saved to .CSV file");
+    }
+}
+
 impl epi::App for SerialInputData {
 
     fn name(&self) -> &str {
@@ -55,8 +62,7 @@ impl epi::App for SerialInputData {
             
 
             if ui.button("Save Data").on_hover_text("Save the current data to a .CSV file").clicked() {
-                // Save the data to a .CSV file
-                println!("Data saved to .CSV file");
+                self.save_to_csv();
             }
 
             ui.separator();
