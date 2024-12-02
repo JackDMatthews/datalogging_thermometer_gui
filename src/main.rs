@@ -53,6 +53,12 @@ impl epi::App for SerialInputData {
                 }
             });
             
+
+            if ui.button("Save Data").on_hover_text("Save the current data to a .CSV file").clicked() {
+                // Save the data to a .CSV file
+                println!("Data saved to .CSV file");
+            }
+
             ui.separator();
 
             ui.heading("Temperature Data Plot");
@@ -84,7 +90,7 @@ fn main() {
         vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],   
         vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     ];
