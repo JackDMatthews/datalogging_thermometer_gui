@@ -11,6 +11,22 @@ impl SerialInputData {
     fn save_to_csv(&self) {
         // Save the data to a .CSV file
         println!("Data saved to .CSV file");
+
+        let data = self.data.lock().unwrap();
+        let time = self.time.lock().unwrap();
+
+        let mut writer = csv::Writer::from_path("data.csv").unwrap();
+        writer.write_record(&["Time", "Sensor 1", "Sensor 2", "Sensor 3", "Sensor 4", "Sensor 5", "Sensor 6", "Sensor 7", "Sensor 8"]).unwrap();
+        for i in 0..time.len() {
+            let mut record = vec![time[i].to_string()];
+            for j in 0..8 {
+                record.push(data[j][i].to_string());
+            }
+            writer.write_record(&record).unwrap();
+        }
+        writer.flush().unwrap();
+
+        
     }
 }
 
@@ -23,7 +39,8 @@ impl epi::App for SerialInputData {
     fn update(&mut self, ctx: &egui::Context, _frame: &epi::Frame) {
         ctx.request_repaint(); // Request regular updates for real-time changes
 
-        let data = self.data.lock().unwrap();
+        let data = self.data.lock().unwrap().clone();
+
 
         
 
