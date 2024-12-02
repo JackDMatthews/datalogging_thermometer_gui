@@ -1,4 +1,5 @@
 use eframe::{egui, epi};
+use chrono;
 use std::{sync::{Arc, Mutex}, vec};
 
 struct SerialInputData {
@@ -14,8 +15,8 @@ impl SerialInputData {
 
         let data = self.data.lock().unwrap();
         let time = self.time.lock().unwrap();
-
-        let mut writer = csv::Writer::from_path("data.csv").unwrap();
+        let current_time = chrono::Local::now().format("%Y%m%d%H%M%S").to_string();
+        let mut writer = csv::Writer::from_path(format!("data{}.csv", current_time)).unwrap();
         writer.write_record(&["Time", "Sensor 1", "Sensor 2", "Sensor 3", "Sensor 4", "Sensor 5", "Sensor 6", "Sensor 7", "Sensor 8"]).unwrap();
         for i in 0..time.len() {
             let mut record = vec![time[i].to_string()];
