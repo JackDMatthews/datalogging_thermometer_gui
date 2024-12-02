@@ -1,6 +1,7 @@
 use eframe::{egui, epi};
 use chrono;
 use std::{sync::{Arc, Mutex}, vec};
+use std::io::{self};
 
 struct SerialInputData {
     data: Arc<Mutex<Vec<Vec<f32>>>>,  // Stores the incoming serial data
@@ -25,9 +26,26 @@ impl SerialInputData {
             }
             writer.write_record(&record).unwrap();
         }
-        writer.flush().unwrap();
+        writer.flush().unwrap();   
+    }
 
-        
+    fn append_data (&self, new_data: &str) {
+        // split the incoming data by commas
+        let split_data: Vec<&str> = new_data.split(',').collect();
+        self.time.lock().unwrap().push(split_data[0].parse::<f32>().unwrap());
+        for i in 1..9 {
+            // convert the data to f32 while removing the last character (which is C for celsius) and skip the first element (which is the time)
+            let value = split_data[i].trim_end_matches('C').parse::<f32>().unwrap();
+            self.data.lock().unwrap()[i-1].push(value);
+        }
+    }
+
+    fn read_input_from_cmd(&self) {
+        println!("Please enter new data (comma separated): ");
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).expect("Failed to read line");
+        let input = input.trim();
+        self.append_data(input);
     }
 }
 
@@ -128,6 +146,8 @@ fn main() {
         checked: vec![true; 8],
     };
 
+
+    app.read_input_from_cmd();
 
     // Launch the application window with `eframe`
     eframe::run_native(
