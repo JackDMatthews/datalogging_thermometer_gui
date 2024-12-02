@@ -1,6 +1,6 @@
 use eframe::{egui, epi};
 use chrono;
-use std::{sync::{Arc, Mutex}, vec};
+use std::{sync::{Arc, Mutex}, vec, thread};
 use std::io::{self};
 
 struct SerialInputData {
@@ -147,7 +147,22 @@ fn main() {
     };
 
 
-    app.read_input_from_cmd();
+    // Clone the Arc references before moving app into the thread
+    let app_data = Arc::clone(&app.data);
+    let app_time = Arc::clone(&app.time);
+    let app_checked = app.checked.clone();
+
+    // Spawn a new thread to run read_input_from_cmd
+    thread::spawn(move || {
+        let app = SerialInputData {
+            data: app_data,
+            time: app_time,
+            checked: app_checked,
+        };
+        loop {
+            app.read_input_from_cmd();
+        }
+    });
 
     // Launch the application window with `eframe`
     eframe::run_native(
