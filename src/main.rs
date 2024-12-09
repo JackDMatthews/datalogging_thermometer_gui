@@ -1,7 +1,5 @@
 use eframe::{egui, epi};
-use chrono;
-use std::{sync::{Arc, Mutex}, vec, thread};
-use std::io::{self};
+use std::{sync::{Arc, Mutex}, thread, io};
 
 struct SerialInputData {
     data: Arc<Mutex<Vec<Vec<f32>>>>,  // Stores the incoming serial data
@@ -16,9 +14,9 @@ impl SerialInputData {
 
         let data = self.data.lock().unwrap();
         let time = self.time.lock().unwrap();
-        let current_time = chrono::Local::now().format("%Y%m%d%H%M%S").to_string();
-        let mut writer = csv::Writer::from_path(format!("data{}.csv", current_time)).unwrap();
-        writer.write_record(&["Time", "Sensor 1", "Sensor 2", "Sensor 3", "Sensor 4", "Sensor 5", "Sensor 6", "Sensor 7", "Sensor 8"]).unwrap();
+        let current_time = chrono::Local::now().format("%Y-%m-%d %H-%M-%S").to_string();
+        let mut writer = csv::Writer::from_path(format!("data {}.csv", current_time)).unwrap();
+        writer.write_record(["Time", "Sensor 1", "Sensor 2", "Sensor 3", "Sensor 4", "Sensor 5", "Sensor 6", "Sensor 7", "Sensor 8"]).unwrap();
         for i in 0..time.len() {
             let mut record = vec![time[i].to_string()];
             for j in 0..8 {
@@ -33,9 +31,9 @@ impl SerialInputData {
         // split the incoming data by commas
         let split_data: Vec<&str> = new_data.split(',').collect();
         self.time.lock().unwrap().push(split_data[0].parse::<f32>().unwrap());
-        for i in 1..9 {
-            // convert the data to f32 while removing the last character (which is C for celsius) and skip the first element (which is the time)
-            let value = split_data[i].trim_end_matches('C').parse::<f32>().unwrap();
+        for (i, &data_str) in split_data.iter().enumerate().skip(1).take(8) {
+            // convert the data to f32 while removing the last character (which is C for celsius)
+            let value = data_str.trim_end_matches('C').parse::<f32>().unwrap();
             self.data.lock().unwrap()[i-1].push(value);
         }
     }
@@ -43,7 +41,7 @@ impl SerialInputData {
     fn read_input_from_cmd(&self) {
         println!("Please enter new data (comma separated): ");
         let mut input = String::new();
-        io::stdin().read_line(&mut input).expect("Failed to read line");
+        io::stdin().read_line(&mut input).expect("Input should be read in from the command line");
         let input = input.trim();
         self.append_data(input);
     }
@@ -60,14 +58,10 @@ impl epi::App for SerialInputData {
 
         let data = self.data.lock().unwrap().clone();
 
-
-        
-
         // GUI drawing logic (plotting the serial data)
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Current Temperature Data");
 
-            // 2 by 4 grid of current data
 
             //get window size
             let window_size = ui.available_size_before_wrap();
@@ -75,16 +69,14 @@ impl epi::App for SerialInputData {
         
             
             egui::Grid::new("current_data_grid").show(ui, |ui| {
-                let spacing = ui.spacing_mut();
-                spacing.item_spacing = egui::vec2(0.0, 0.0); // Add some spacing between the elements
-                for i in 0..2 {
-                    for j in 0..4 {
-                        let index = i * 4 + j;
+                for row in 0..2 {
+                    for col in 0..4 {
+                        let index = row * 4 + col;
                         let value = data.get(index).and_then(|inner| inner.last()).unwrap_or(&0.0);
                         ui.group(|ui| {
                             ui.set_width(window_size.x * 0.25 - 6.0 * 3.0);
                             ui.horizontal(|ui| {
-                                ui.label(format!("Sensor {}: ", index));
+                                ui.label(format!("Sensor {}: ", index+1));
                                 ui.label(egui::RichText::new(format!("{:6.3}°C", value)).strong());
                             });    
                             ui.with_layout(egui::Layout::right_to_left(), |ui| {
@@ -96,15 +88,13 @@ impl epi::App for SerialInputData {
                 }
             });
             
-
-            if ui.button("Save Data").on_hover_text("Save the current data to a .CSV file").clicked() {
+            if ui.button("Save Data").on_hover_text("Save the current data to a .CSV file (YMD HMS for alphabetical sorting)").clicked() {
                 self.save_to_csv();
             }
 
             ui.separator();
 
             ui.heading("Temperature Data Plot");
-
 
             let plot = egui::plot::Plot::new("data_plot");
             plot.show(ui, |plot_ui| {
@@ -168,7 +158,7 @@ fn main() {
     eframe::run_native(
         Box::new(app),
         eframe::NativeOptions {
-            initial_window_size: Some(egui::vec2(800.0, 600.0)),
+            maximized: true,
             ..Default::default()
         },
     );
