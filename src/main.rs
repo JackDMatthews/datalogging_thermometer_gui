@@ -5,6 +5,7 @@ struct SerialInputData {
     data: Arc<Mutex<Vec<Vec<f32>>>>,  // Stores the incoming serial data
     time : Arc<Mutex<Vec<f32>>>, // Stores the time data
     checked: Vec<bool>, // Stores the checked state of the checkboxes
+    colours: Vec<[f32; 3]>, // Stores the RGB values of the line colours
 }
 
 impl SerialInputData {
@@ -62,12 +63,9 @@ impl epi::App for SerialInputData {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Current Temperature Data");
 
-
             //get window size
             let window_size = ui.available_size_before_wrap();
 
-        
-            
             egui::Grid::new("current_data_grid").show(ui, |ui| {
                 for row in 0..2 {
                     for col in 0..4 {
@@ -81,6 +79,7 @@ impl epi::App for SerialInputData {
                             });    
                             ui.with_layout(egui::Layout::right_to_left(), |ui| {
                                 ui.checkbox(&mut self.checked[index], "");
+                                ui.color_edit_button_rgb(&mut self.colours[index]);
                             });
                         });
                     }
@@ -101,9 +100,9 @@ impl epi::App for SerialInputData {
                 for i in 0..8 {
                     if self.checked[i] {
                         let color = egui::Color32::from_rgb(
-                            (i * 32) as u8,
-                            (255 - i * 32) as u8,
-                            (i * 16) as u8,
+                            (255.0 * self.colours[i][0]) as u8,
+                            (255.0 * self.colours[i][1]) as u8,
+                            (255.0 * self.colours[i][2]) as u8,
                         );
                         let time = self.time.lock().unwrap();
                         let data: Vec<_> = data.get(i).unwrap().iter().enumerate().map(|(i, &v)| egui::plot::Value::new(time[i] as f64, v as f64)).collect();
@@ -129,11 +128,23 @@ fn main() {
 
     let dummy_time = vec![0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6];
 
+    let line_colours = vec![
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [1.0, 1.0, 0.0],
+        [1.0, 0.0, 1.0],
+        [0.0, 1.0, 1.0],
+        [1.0, 1.0, 1.0],
+        [0.5, 0.5, 0.5],
+    ];
+
     // Set up the app
     let app = SerialInputData {
         data: Arc::new(Mutex::new(dummy_data)),
         time: Arc::new(Mutex::new(dummy_time)),
         checked: vec![true; 8],
+        colours: line_colours,
     };
 
 
@@ -141,6 +152,7 @@ fn main() {
     let app_data = Arc::clone(&app.data);
     let app_time = Arc::clone(&app.time);
     let app_checked = app.checked.clone();
+    let app_colours = app.colours.clone();
 
     // Spawn a new thread to run read_input_from_cmd
     thread::spawn(move || {
@@ -148,6 +160,7 @@ fn main() {
             data: app_data,
             time: app_time,
             checked: app_checked,
+            colours: app_colours,
         };
         loop {
             app.read_input_from_cmd();
