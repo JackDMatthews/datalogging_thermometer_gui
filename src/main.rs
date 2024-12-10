@@ -2,20 +2,23 @@ use eframe::{egui, epi};
 use std::{sync::{Arc, Mutex}, thread, io};
 
 struct SerialInputData {
-    data: Arc<Mutex<Vec<Vec<f32>>>>,  // Stores the incoming serial data
-    time : Arc<Mutex<Vec<f32>>>, // Stores the time data
-    checked: Vec<bool>, // Stores the checked state of the checkboxes
-    colours: Vec<[f32; 3]>, // Stores the RGB values of the line colours
+    data: Arc<Mutex<Vec<Vec<f32>>>>,  // 2d vector of temperature data
+    time : Arc<Mutex<Vec<f32>>>, // Vector of time data
+    checked: Vec<bool>, // Vector of booleans if given line is to be plotted
+    colours: Vec<[f32; 3]>, // Vector of RGB colours for each line
 }
 
 impl SerialInputData {
     fn save_to_csv(&self) {
-        // Save the data to a .CSV file
+        // cmd output for testing
         println!("Data saved to .CSV file");
 
+        // lock the data and time vectors
         let data = self.data.lock().unwrap();
         let time = self.time.lock().unwrap();
         let current_time = chrono::Local::now().format("%Y-%m-%d %H-%M-%S").to_string();
+
+        // write the data to a .csv file
         let mut writer = csv::Writer::from_path(format!("data {}.csv", current_time)).unwrap();
         writer.write_record(["Time", "Sensor 1", "Sensor 2", "Sensor 3", "Sensor 4", "Sensor 5", "Sensor 6", "Sensor 7", "Sensor 8"]).unwrap();
         for i in 0..time.len() {
@@ -28,7 +31,22 @@ impl SerialInputData {
         writer.flush().unwrap();   
     }
 
+    fn read_input_from_cmd(&self) {
+        println!("Please enter new data (comma separated): ");
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).expect("Input should be read in from the command line");
+        let input = input.trim();
+        self.append_data(input);
+    }
+
     fn append_data (&self, new_data: &str) {
+        // first check if str is an info string
+        let first_char = new_data.chars().next().unwrap();
+        if ['#', '?', '/', '-'].contains(&first_char) {
+            self.handle_info_string(new_data);
+            return;
+        }
+
         // split the incoming data by commas
         let split_data: Vec<&str> = new_data.split(',').collect();
         self.time.lock().unwrap().push(split_data[0].parse::<f32>().unwrap());
@@ -39,17 +57,15 @@ impl SerialInputData {
         }
     }
 
-    fn read_input_from_cmd(&self) {
-        println!("Please enter new data (comma separated): ");
-        let mut input = String::new();
-        io::stdin().read_line(&mut input).expect("Input should be read in from the command line");
-        let input = input.trim();
-        self.append_data(input);
+    fn handle_info_string(&self, info_string: &str) {
+        // temporary print statement for testing
+        println!("Info string received: {}", info_string);
     }
 }
 
 impl epi::App for SerialInputData {
 
+    // app header
     fn name(&self) -> &str {
         "Thermometer Data"
     }
@@ -59,13 +75,14 @@ impl epi::App for SerialInputData {
 
         let data = self.data.lock().unwrap().clone();
 
-        // GUI drawing logic (plotting the serial data)
+        // Create the UI
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Current Temperature Data");
 
             //get window size
             let window_size = ui.available_size_before_wrap();
 
+            // plot grid of values (2x4)
             egui::Grid::new("current_data_grid").show(ui, |ui| {
                 for row in 0..2 {
                     for col in 0..4 {
@@ -87,6 +104,7 @@ impl epi::App for SerialInputData {
                 }
             });
             
+            // Save data to .CSV file on button press
             if ui.button("Save Data").on_hover_text("Save the current data to a .CSV file (YMD HMS for alphabetical sorting)").clicked() {
                 self.save_to_csv();
             }
@@ -95,6 +113,7 @@ impl epi::App for SerialInputData {
 
             ui.heading("Temperature Data Plot");
 
+            // Plot the data
             let plot = egui::plot::Plot::new("data_plot");
             plot.show(ui, |plot_ui| {
                 for i in 0..8 {
@@ -115,6 +134,7 @@ impl epi::App for SerialInputData {
 }
 
 fn main() {
+    // Dummy data for testing, to be replaced with empty vectors and filled by serial input
     let dummy_data = vec![
         vec![15.0, 15.4, 14.9, 15.2, 15.5, 15.7, 15.6, 15.78],
         vec![16.0, 16.1, 15.96, 16.13, 16.04 , 15.98, 16.02, 16.1],
@@ -126,9 +146,11 @@ fn main() {
         vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     ];
 
+    // Dummy time data for testing, will start empty and be filled by serial input
     let dummy_time = vec![0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6];
 
-    let line_colours = vec![
+    // Default line colours for the plot
+    let default_line_colours = vec![
         [1.0, 0.0, 0.0],
         [0.0, 1.0, 0.0],
         [0.0, 0.0, 1.0],
@@ -144,7 +166,7 @@ fn main() {
         data: Arc::new(Mutex::new(dummy_data)),
         time: Arc::new(Mutex::new(dummy_time)),
         checked: vec![true; 8],
-        colours: line_colours,
+        colours: default_line_colours,
     };
 
 
@@ -167,7 +189,7 @@ fn main() {
         }
     });
 
-    // Launch the application window with `eframe`
+    // Launch the application window
     eframe::run_native(
         Box::new(app),
         eframe::NativeOptions {
