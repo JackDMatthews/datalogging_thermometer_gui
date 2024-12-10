@@ -4,7 +4,7 @@ use std::{sync::{Arc, Mutex}, thread, io};
 struct SerialInputData {
     data: Arc<Mutex<Vec<Vec<f32>>>>,  // 2d vector of temperature data
     time : Arc<Mutex<Vec<u64>>>, // Vector of time in ms since start
-    time_received: Vec<String>, // Vector of datetime when data was received
+    time_received: Arc<Mutex<Vec<String>>>, // Vector of datetime when data was received
     checked: Vec<bool>, // Vector of booleans if given line is to be plotted
     colours: Vec<[f32; 3]>, // Vector of RGB colours for each line
 }
@@ -17,13 +17,14 @@ impl SerialInputData {
         // lock the data and time vectors
         let data = self.data.lock().unwrap();
         let time = self.time.lock().unwrap();
+        let time_received = self.time_received.lock().unwrap();
         let current_time = chrono::Local::now().format("%Y-%m-%d %H-%M-%S").to_string();
 
         // write the data to a .csv file
         let mut writer = csv::Writer::from_path(format!("data {}.csv", current_time)).unwrap();
         writer.write_record([ "datetime of data", "Time since start (ms)", "Sensor 1", "Sensor 2", "Sensor 3", "Sensor 4", "Sensor 5", "Sensor 6", "Sensor 7", "Sensor 8"]).unwrap();
         for i in 0..time.len() {
-            let mut record = vec![self.time_received[i].to_string()];
+            let mut record = vec![time_received[i].to_string()];
             record.push(time[i].to_string());
             for j in 0..8 {
                 record.push(data[j][i].to_string());
@@ -53,6 +54,8 @@ impl SerialInputData {
         let split_data: Vec<&str> = new_data.split(',').collect();
 
         self.time.lock().unwrap().push(split_data[0].parse::<u64>().unwrap());
+        self.time_received.lock().unwrap().push(chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string());
+
         for (i, &data_str) in split_data.iter().enumerate().skip(1).take(8) {
             // convert the data to f32 while removing the last character (which is C for celsius)
             let value = data_str.trim_end_matches('C').parse::<f32>().unwrap();
@@ -179,7 +182,7 @@ fn main() {
     let app = SerialInputData {
         data: Arc::new(Mutex::new(dummy_data)),
         time: Arc::new(Mutex::new(dummy_time)),
-        time_received: dummy_datetime,
+        time_received: Arc::new(Mutex::new(dummy_datetime)),
         checked: vec![true; 8],
         colours: default_line_colours,
     };
