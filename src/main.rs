@@ -3,7 +3,8 @@ use std::{sync::{Arc, Mutex}, thread, io};
 
 struct SerialInputData {
     data: Arc<Mutex<Vec<Vec<f32>>>>,  // 2d vector of temperature data
-    time : Arc<Mutex<Vec<f32>>>, // Vector of time data
+    time : Arc<Mutex<Vec<u64>>>, // Vector of time in ms since start
+    time_received: Vec<String>, // Vector of datetime when data was received
     checked: Vec<bool>, // Vector of booleans if given line is to be plotted
     colours: Vec<[f32; 3]>, // Vector of RGB colours for each line
 }
@@ -49,7 +50,8 @@ impl SerialInputData {
 
         // split the incoming data by commas
         let split_data: Vec<&str> = new_data.split(',').collect();
-        self.time.lock().unwrap().push(split_data[0].parse::<f32>().unwrap());
+
+        self.time.lock().unwrap().push(split_data[0].parse::<u64>().unwrap());
         for (i, &data_str) in split_data.iter().enumerate().skip(1).take(8) {
             // convert the data to f32 while removing the last character (which is C for celsius)
             let value = data_str.trim_end_matches('C').parse::<f32>().unwrap();
@@ -147,7 +149,18 @@ fn main() {
     ];
 
     // Dummy time data for testing, will start empty and be filled by serial input
-    let dummy_time = vec![0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6];
+    let dummy_time = vec![0, 125, 250, 375, 500, 625, 750, 875];
+
+    let dummy_datetime = vec![
+        "2021-09-01 12:00:00.000".to_string(),
+        "2021-09-01 12:00:00.125".to_string(),
+        "2021-09-01 12:00:00.250".to_string(),
+        "2021-09-01 12:00:00.375".to_string(),
+        "2021-09-01 12:00:00.500".to_string(),
+        "2021-09-01 12:00:00.625".to_string(),
+        "2021-09-01 12:00:00.750".to_string(),
+        "2021-09-01 12:00:00.875".to_string(),
+    ];
 
     // Default line colours for the plot
     let default_line_colours = vec![
@@ -165,6 +178,7 @@ fn main() {
     let app = SerialInputData {
         data: Arc::new(Mutex::new(dummy_data)),
         time: Arc::new(Mutex::new(dummy_time)),
+        time_received: dummy_datetime,
         checked: vec![true; 8],
         colours: default_line_colours,
     };
@@ -173,6 +187,7 @@ fn main() {
     // Clone the Arc references before moving app into the thread
     let app_data = Arc::clone(&app.data);
     let app_time = Arc::clone(&app.time);
+    let app_time_received = app.time_received.clone();
     let app_checked = app.checked.clone();
     let app_colours = app.colours.clone();
 
@@ -181,6 +196,7 @@ fn main() {
         let app = SerialInputData {
             data: app_data,
             time: app_time,
+            time_received: app_time_received,
             checked: app_checked,
             colours: app_colours,
         };
