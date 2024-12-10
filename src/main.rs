@@ -21,9 +21,10 @@ impl SerialInputData {
 
         // write the data to a .csv file
         let mut writer = csv::Writer::from_path(format!("data {}.csv", current_time)).unwrap();
-        writer.write_record(["Time", "Sensor 1", "Sensor 2", "Sensor 3", "Sensor 4", "Sensor 5", "Sensor 6", "Sensor 7", "Sensor 8"]).unwrap();
+        writer.write_record([ "datetime of data", "Time since start (ms)", "Sensor 1", "Sensor 2", "Sensor 3", "Sensor 4", "Sensor 5", "Sensor 6", "Sensor 7", "Sensor 8"]).unwrap();
         for i in 0..time.len() {
-            let mut record = vec![time[i].to_string()];
+            let mut record = vec![self.time_received[i].to_string()];
+            record.push(time[i].to_string());
             for j in 0..8 {
                 record.push(data[j][i].to_string());
             }
@@ -152,14 +153,14 @@ fn main() {
     let dummy_time = vec![0, 125, 250, 375, 500, 625, 750, 875];
 
     let dummy_datetime = vec![
-        "2021-09-01 12:00:00.000".to_string(),
-        "2021-09-01 12:00:00.125".to_string(),
-        "2021-09-01 12:00:00.250".to_string(),
-        "2021-09-01 12:00:00.375".to_string(),
-        "2021-09-01 12:00:00.500".to_string(),
-        "2021-09-01 12:00:00.625".to_string(),
-        "2021-09-01 12:00:00.750".to_string(),
-        "2021-09-01 12:00:00.875".to_string(),
+        "2024-12-11 12:00:00.000".to_string(),
+        "2024-12-11 12:00:00.125".to_string(),
+        "2024-12-11 12:00:00.250".to_string(),
+        "2024-12-11 12:00:00.375".to_string(),
+        "2024-12-11 12:00:00.500".to_string(),
+        "2024-12-11 12:00:00.625".to_string(),
+        "2024-12-11 12:00:00.750".to_string(),
+        "2024-12-11 12:00:00.875".to_string(),
     ];
 
     // Default line colours for the plot
