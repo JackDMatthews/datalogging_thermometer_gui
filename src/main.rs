@@ -1,5 +1,5 @@
 use eframe::{egui, epi};
-use std::{sync::{Arc, Mutex}, thread, io};
+use std::{io, sync::{Arc, Mutex}, thread};
 
 struct SerialInputData {
     data: Arc<Mutex<Vec<Vec<f32>>>>,  // 2d vector of temperature data
@@ -57,6 +57,10 @@ impl SerialInputData {
         self.time_received.lock().unwrap().push(chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string());
 
         for (i, &data_str) in split_data.iter().enumerate().skip(1).take(8) {
+            if data_str.is_empty() {
+                self.data.lock().unwrap()[i-1].push(f32::NAN);
+                continue;
+            }
             // convert the data to f32 while removing the last character (which is C for celsius)
             let value = data_str.trim_end_matches('C').parse::<f32>().unwrap();
             self.data.lock().unwrap()[i-1].push(value);
@@ -98,7 +102,11 @@ impl epi::App for SerialInputData {
                             ui.set_width(window_size.x * 0.25 - 6.0 * 3.0);
                             ui.horizontal(|ui| {
                                 ui.label(format!("Sensor {}: ", index+1));
-                                ui.label(egui::RichText::new(format!("{:6.3}°C", value)).strong());
+                                if value.is_nan() {
+                                    ui.label("No data");
+                                } else {
+                                    ui.label(egui::RichText::new(format!("{:6.3}°C", value)).strong());
+                                }
                             });    
                             ui.with_layout(egui::Layout::right_to_left(), |ui| {
                                 ui.checkbox(&mut self.checked[index], "");
