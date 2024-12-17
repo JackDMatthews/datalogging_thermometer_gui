@@ -1,37 +1,48 @@
 use eframe::{egui, epi};
 use std::{io, sync::{Arc, Mutex}, thread};
 
-struct SerialInputData {
-    data: Arc<Mutex<Vec<Vec<f32>>>>,  // 2d vector of temperature data
-    time : Arc<Mutex<Vec<u64>>>, // Vector of time in ms since start
-    time_received: Arc<Mutex<Vec<String>>>, // Vector of datetime when data was received
-    checked: Vec<bool>, // Vector of booleans if given line is to be plotted
-    colours: Vec<[f32; 3]>, // Vector of RGB colours for each line
+const NUM_CHANNELS: usize = 8;
+
+struct SerialDataPoint{
+    time: u64, // time since thermometer start, in ms
+    temperature: Vec<f32>, // temperature of each sensorm, stored in vector 
+    time_received: String, //datetime of data received
 }
 
-impl SerialInputData {
+#[derive(Clone)]
+struct ThermometerApp{
+    data : Arc<Mutex<Vec<SerialDataPoint>>>, // data from the serial port
+    checked: Arc<Mutex<Vec<bool>>>, // whether the data for each channel is plotted
+    colours: Arc<Mutex<Vec<[f32; 3]>>>, // line colours for each channel
+}
+
+impl ThermometerApp {
     fn save_to_csv(&self) {
         // cmd output for testing
         println!("Data saved to .CSV file");
 
         // lock the data and time vectors
         let data = self.data.lock().unwrap();
-        let time = self.time.lock().unwrap();
-        let time_received = self.time_received.lock().unwrap();
         let current_time = chrono::Local::now().format("%Y-%m-%d %H-%M-%S").to_string();
 
         // write the data to a .csv file
         let mut writer = csv::Writer::from_path(format!("data {}.csv", current_time)).unwrap();
-        writer.write_record([ "datetime of data", "Time since start (ms)", "Sensor 1", "Sensor 2", "Sensor 3", "Sensor 4", "Sensor 5", "Sensor 6", "Sensor 7", "Sensor 8"]).unwrap();
-        for i in 0..time.len() {
-            let mut record = vec![time_received[i].to_string()];
-            record.push(time[i].to_string());
-            for j in 0..8 {
-                record.push(data[j][i].to_string());
+
+        let sensor_headers: Vec<String> = (1..=NUM_CHANNELS).map(|i| format!("Sensor {}", i)).collect();
+
+        let mut headers = vec!["datetime of data", "Time since start (ms)"];
+        headers.extend(sensor_headers.iter().map(|s| s.as_str()));
+        writer.write_record(&headers).unwrap();
+        
+        for data_point in data.iter() {
+            let mut record = vec![data_point.time_received.clone()];
+            record.push(data_point.time.to_string());
+            for temp in &data_point.temperature {
+                record.push(temp.to_string());
             }
             writer.write_record(&record).unwrap();
         }
-        writer.flush().unwrap();   
+        writer.flush().unwrap();
     }
 
     fn read_input_from_cmd(&self) {
@@ -53,19 +64,31 @@ impl SerialInputData {
         // split the incoming data by commas
         let split_data: Vec<&str> = new_data.split(',').collect();
 
-        self.time.lock().unwrap().push(split_data[0].parse::<u64>().unwrap());
-        self.time_received.lock().unwrap().push(chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string());
+        let time = split_data[0].parse::<u64>().unwrap();
+        let datetime_received = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string();
 
-        for (i, &data_str) in split_data.iter().enumerate().skip(1).take(8) {
+        let mut temperatures = Vec::new();
+
+        for &data_str in split_data.iter().skip(1).take(8) {
             if data_str.is_empty() {
-                self.data.lock().unwrap()[i-1].push(f32::NAN);
+                temperatures.push(f32::NAN);
                 continue;
             }
             // convert the data to f32 while removing the last character (which is C for celsius)
             let value = data_str.trim_end_matches('C').parse::<f32>().unwrap();
-            self.data.lock().unwrap()[i-1].push(value);
+            temperatures.push(value);
         }
+
+        let new_data_point = SerialDataPoint {
+            time,
+            temperature: temperatures,
+            time_received: datetime_received,
+        };
+
+        let mut data = self.data.lock().unwrap();
+        data.push(new_data_point);
     }
+
 
     fn handle_info_string(&self, info_string: &str) {
         // temporary print statement for testing
@@ -73,17 +96,18 @@ impl SerialInputData {
     }
 }
 
-impl epi::App for SerialInputData {
 
-    // app header
+impl epi::App for ThermometerApp {
+
     fn name(&self) -> &str {
         "Thermometer Data"
     }
+    
 
     fn update(&mut self, ctx: &egui::Context, _frame: &epi::Frame) {
         ctx.request_repaint(); // Request regular updates for real-time changes
 
-        let data = self.data.lock().unwrap().clone();
+        
 
         // Create the UI
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -92,27 +116,37 @@ impl epi::App for SerialInputData {
             //get window size
             let window_size = ui.available_size_before_wrap();
 
+            let data_points = self.data.lock().unwrap();
+
             // plot grid of values (2x4)
             egui::Grid::new("current_data_grid").show(ui, |ui| {
+                let latest_data_point = data_points.last().unwrap();
                 for row in 0..2 {
                     for col in 0..4 {
+
                         let index = row * 4 + col;
-                        let value = data.get(index).and_then(|inner| inner.last()).unwrap_or(&0.0);
+                        let current_sensor_temp = latest_data_point.temperature.get(index).unwrap();
+                        let mut checked = self.checked.lock().unwrap();
+                        let mut colours = self.colours.lock().unwrap();
+
                         ui.group(|ui| {
                             ui.set_width(window_size.x * 0.25 - 6.0 * 3.0);
+
                             ui.horizontal(|ui| {
                                 ui.label(format!("Sensor {}: ", index+1));
-                                if value.is_nan() {
+                                if current_sensor_temp.is_nan() {
                                     ui.label("No data");
                                 } else {
-                                    ui.label(egui::RichText::new(format!("{:6.3}°C", value)).strong());
+                                    ui.label(egui::RichText::new(format!("{:6.3}°C", current_sensor_temp)).strong());
                                 }
                             });    
+                            
                             ui.with_layout(egui::Layout::right_to_left(), |ui| {
-                                ui.checkbox(&mut self.checked[index], "");
-                                ui.color_edit_button_rgb(&mut self.colours[index]);
+                                ui.checkbox(&mut checked[index], "");
+                                ui.color_edit_button_rgb(&mut colours[index]);
                             });
                         });
+
                     }
                     ui.end_row();
                 }
@@ -127,19 +161,25 @@ impl epi::App for SerialInputData {
 
             ui.heading("Temperature Data Plot");
 
-            // Plot the data
+            //
+
             let plot = egui::plot::Plot::new("data_plot");
             plot.show(ui, |plot_ui| {
+                let checked = self.checked.lock().unwrap();
+                let colours = self.colours.lock().unwrap();
+                
                 for i in 0..8 {
-                    if self.checked[i] {
+                    if checked[i] {
                         let color = egui::Color32::from_rgb(
-                            (255.0 * self.colours[i][0]) as u8,
-                            (255.0 * self.colours[i][1]) as u8,
-                            (255.0 * self.colours[i][2]) as u8,
+                            (255.0 * colours[i][0]) as u8,
+                            (255.0 * colours[i][1]) as u8,
+                            (255.0 * colours[i][2]) as u8,
                         );
-                        let time = self.time.lock().unwrap();
-                        let data: Vec<_> = data.get(i).unwrap().iter().enumerate().map(|(i, &v)| egui::plot::Value::new(time[i] as f64, v as f64)).collect();
-                        plot_ui.line(egui::plot::Line::new(egui::plot::Values::from_values(data)).color(color));
+                        let times = data_points.iter().map(|d| d.time as f64).collect::<Vec<f64>>();
+                        let temperatures = data_points.iter().map(|d| d.temperature[i] as f64).collect::<Vec<f64>>();
+                        let values: Vec<egui::plot::Value> = times.iter().zip(temperatures.iter()).map(|(&t, &temp)| egui::plot::Value::new(t, temp)).collect();
+
+                        plot_ui.line(egui::plot::Line::new(egui::plot::Values::from_values(values)).color(color));
                     }
                 }
             });
@@ -148,31 +188,6 @@ impl epi::App for SerialInputData {
 }
 
 fn main() {
-    // Dummy data for testing, to be replaced with empty vectors and filled by serial input
-    let dummy_data = vec![
-        vec![15.0, 15.4, 14.9, 15.2, 15.5, 15.7, 15.6, 15.78],
-        vec![16.0, 16.1, 15.96, 16.13, 16.04 , 15.98, 16.02, 16.1],
-        vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],   
-        vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-    ];
-
-    // Dummy time data for testing, will start empty and be filled by serial input
-    let dummy_time = vec![0, 125, 250, 375, 500, 625, 750, 875];
-
-    let dummy_datetime = vec![
-        "2024-12-11 12:00:00.000".to_string(),
-        "2024-12-11 12:00:00.125".to_string(),
-        "2024-12-11 12:00:00.250".to_string(),
-        "2024-12-11 12:00:00.375".to_string(),
-        "2024-12-11 12:00:00.500".to_string(),
-        "2024-12-11 12:00:00.625".to_string(),
-        "2024-12-11 12:00:00.750".to_string(),
-        "2024-12-11 12:00:00.875".to_string(),
-    ];
 
     // Default line colours for the plot
     let default_line_colours = vec![
@@ -186,34 +201,31 @@ fn main() {
         [0.5, 0.5, 0.5],
     ];
 
-    // Set up the app
-    let app = SerialInputData {
-        data: Arc::new(Mutex::new(dummy_data)),
-        time: Arc::new(Mutex::new(dummy_time)),
-        time_received: Arc::new(Mutex::new(dummy_datetime)),
-        checked: vec![true; 8],
-        colours: default_line_colours,
+    
+    let dummy_data_points = vec![
+        SerialDataPoint {
+            time: 0,
+            temperature: vec![15.0, 15.4, 14.9, 15.2, 15.5, 15.7, 15.6, 15.78],
+            time_received: "2024-12-11 12:00:00.000".to_string(),
+        },
+        SerialDataPoint {
+            time: 125,
+            temperature: vec![16.0, 16.1, 15.96, 16.13, 16.04 , 15.98, 16.02, 16.1],
+            time_received: "2024-12-11 12:00:00.125".to_string(),
+        },
+        ];
+    
+    let app = ThermometerApp {
+        data: Arc::new(Mutex::new(dummy_data_points)),
+        checked: Arc::new(Mutex::new(vec![true; NUM_CHANNELS])),
+        colours: Arc::new(Mutex::new(default_line_colours)),
     };
 
-
-    // Clone the Arc references before moving app into the thread
-    let app_data = Arc::clone(&app.data);
-    let app_time = Arc::clone(&app.time);
-    let app_time_received = app.time_received.clone();
-    let app_checked = app.checked.clone();
-    let app_colours = app.colours.clone();
-
-    // Spawn a new thread to run read_input_from_cmd
+    // make a thread to add data
+    let app_clone = app.clone();
     thread::spawn(move || {
-        let app = SerialInputData {
-            data: app_data,
-            time: app_time,
-            time_received: app_time_received,
-            checked: app_checked,
-            colours: app_colours,
-        };
         loop {
-            app.read_input_from_cmd();
+            app_clone.read_input_from_cmd();
         }
     });
 
