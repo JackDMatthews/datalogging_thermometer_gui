@@ -2,6 +2,7 @@ use eframe::{egui, epi};
 use std::{io, sync::{Arc, Mutex}, thread};
 
 const NUM_CHANNELS: usize = 8;
+const AUTOSAVE_SECONDS_INTERVAL: u64 = 60;
 
 #[derive(Clone)]
 struct SerialDataPoint{
@@ -19,9 +20,6 @@ struct ThermometerApp{
 
 impl ThermometerApp {
     fn save_to_csv(&self) {
-        // cmd output for testing
-        println!("Data saved to .CSV file");
-
         // write the data to a .csv file
         let current_time = chrono::Local::now().format("%Y-%m-%d %H-%M-%S").to_string();
 
@@ -33,11 +31,7 @@ impl ThermometerApp {
         headers.extend(sensor_headers.iter().map(|s| s.as_str()));
         writer.write_record(&headers).unwrap();
 
-        println!("headers written");
-
         let data = self.data.lock().unwrap();
-
-        println!("data");
         
         for data_point in data.iter() {
             let mut record = vec![data_point.time_received.clone()];
@@ -48,6 +42,7 @@ impl ThermometerApp {
             writer.write_record(&record).unwrap();
         }
         writer.flush().unwrap();
+        println!("Data saved to .CSV file");
     }
 
     fn read_input_from_cmd(&self) {
@@ -225,11 +220,21 @@ fn main() {
         colours: Arc::new(Mutex::new(default_line_colours)),
     };
 
-    // make a thread to add data
-    let app_clone = app.clone();
+    // thread to add data
+    let app_read_in = app.clone();
     thread::spawn(move || {
         loop {
-            app_clone.read_input_from_cmd();
+            app_read_in.read_input_from_cmd();
+        }
+    });
+
+    // thread to autosave data
+    let app_autosave = app.clone();
+    thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(AUTOSAVE_SECONDS_INTERVAL));
+            println!("Autosaving data...");
+            app_autosave.save_to_csv();
         }
     });
 
