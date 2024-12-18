@@ -85,7 +85,7 @@ impl ThermometerApp {
             time_received: datetime_received,
         };
 
-        let mut data = self.data.lock().unwrap().clone();
+        let mut data = self.data.lock().unwrap();
         data.push(new_data_point);
     }
 
