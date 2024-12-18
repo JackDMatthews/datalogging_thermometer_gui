@@ -1,6 +1,5 @@
 todo:
 -implement serial reading
--autosave csv
 -serial exceptions (pop-up)
 -cosmetics (icon, app name)
 
