@@ -3,6 +3,7 @@ use std::{io, sync::{Arc, Mutex}, thread};
 
 const NUM_CHANNELS: usize = 8;
 
+#[derive(Clone)]
 struct SerialDataPoint{
     time: u64, // time since thermometer start, in ms
     temperature: Vec<f32>, // temperature of each sensorm, stored in vector 
@@ -21,11 +22,9 @@ impl ThermometerApp {
         // cmd output for testing
         println!("Data saved to .CSV file");
 
-        // lock the data and time vectors
-        let data = self.data.lock().unwrap();
+        // write the data to a .csv file
         let current_time = chrono::Local::now().format("%Y-%m-%d %H-%M-%S").to_string();
 
-        // write the data to a .csv file
         let mut writer = csv::Writer::from_path(format!("data {}.csv", current_time)).unwrap();
 
         let sensor_headers: Vec<String> = (1..=NUM_CHANNELS).map(|i| format!("Sensor {}", i)).collect();
@@ -33,6 +32,12 @@ impl ThermometerApp {
         let mut headers = vec!["datetime of data", "Time since start (ms)"];
         headers.extend(sensor_headers.iter().map(|s| s.as_str()));
         writer.write_record(&headers).unwrap();
+
+        println!("headers written");
+
+        let data = self.data.lock().unwrap();
+
+        println!("data");
         
         for data_point in data.iter() {
             let mut record = vec![data_point.time_received.clone()];
@@ -85,7 +90,7 @@ impl ThermometerApp {
             time_received: datetime_received,
         };
 
-        let mut data = self.data.lock().unwrap();
+        let mut data = self.data.lock().unwrap().clone();
         data.push(new_data_point);
     }
 
@@ -116,7 +121,7 @@ impl epi::App for ThermometerApp {
             //get window size
             let window_size = ui.available_size_before_wrap();
 
-            let data_points = self.data.lock().unwrap();
+            let data_points = self.data.lock().unwrap().clone();
 
             // plot grid of values (2x4)
             egui::Grid::new("current_data_grid").show(ui, |ui| {
@@ -161,7 +166,6 @@ impl epi::App for ThermometerApp {
 
             ui.heading("Temperature Data Plot");
 
-            //
 
             let plot = egui::plot::Plot::new("data_plot");
             plot.show(ui, |plot_ui| {
