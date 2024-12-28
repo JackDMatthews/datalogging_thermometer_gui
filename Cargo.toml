@@ -4,8 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-eframe = "0.17"  # eframe for GUI
+eframe = "0.30"  # eframe for GUI
+egui_plot = "0.30"  # eframe for GUI
 csv = "1.1" # for writing to CSV
 chrono = "0.4" # for time
-serialport = "4.1"  # For serial communication
-tokio = { version = "1", features = ["full"] }  # For async tasks and serial reading
+serialport = "4.6"  # For serial communication
+tokio = { version = "1.42", features = ["full"] }  # For async tasks and serial reading

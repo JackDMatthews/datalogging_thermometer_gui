@@ -1,4 +1,4 @@
-use eframe::{egui, epi};
+use eframe::egui;
 use std::{io, sync::{Arc, Mutex}, thread};
 
 const NUM_CHANNELS: usize = 8;
@@ -17,6 +17,7 @@ struct ThermometerApp{
 }
 
 impl ThermometerApp {
+    // TODO: Make safe from panics. This is called from a different thread so the application will just keep going.
     fn save_to_csv(&self) {
         // write the data to a .csv file
         let current_time = chrono::Local::now().format("%Y-%m-%d %H-%M-%S").to_string();
@@ -89,25 +90,18 @@ impl ThermometerApp {
 }
 
 
-impl epi::App for ThermometerApp {
-
-    fn name(&self) -> &str {
-        "Thermometer Data"
-    }
-    
-
-    fn update(&mut self, ctx: &egui::Context, _frame: &epi::Frame) {
+impl eframe::App for ThermometerApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint(); // Request regular updates for real-time changes
-
-        let channels: &mut [Channel; NUM_CHANNELS] = &mut self.channels.lock().unwrap();
-
+        
         // Create the UI
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Current Temperature Data");
-
+            
             //get window size
             let window_size = ui.available_size_before_wrap();
 
+            let channels: &mut [Channel; NUM_CHANNELS] = &mut self.channels.lock().unwrap();
             // plot grid of values (2x4)
             egui::Grid::new("current_data_grid").show(ui, |ui| {
                 const NUM_COLS: usize = 4;
@@ -124,7 +118,7 @@ impl epi::App for ThermometerApp {
                             }
                         });    
                         
-                        ui.with_layout(egui::Layout::right_to_left(), |ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.checkbox(enabled, "");
                             ui.color_edit_button_srgba(colour);
                         });
@@ -147,14 +141,14 @@ impl epi::App for ThermometerApp {
 
             ui.heading("Temperature Data Plot");
 
-            let plot = egui::plot::Plot::new("data_plot");
+            let plot = egui_plot::Plot::new("data_plot");
             plot.show(ui, |plot_ui| {
                 for Channel{ enabled, colour, data} in channels.iter() {
                     if *enabled {
                         // Filter out times with `None` temps, also format into egui::plot::Values 
-                        let values = data.iter().filter_map(|&(time, opt_temp)| opt_temp.map(|t| egui::plot::Value::new(time as f64, t)));
-
-                        plot_ui.line(egui::plot::Line::new(egui::plot::Values::from_values_iter(values)).color(*colour));
+                        let values = data.iter().filter_map(|&(time, opt_temp)| opt_temp.map(|t| [time as f64, t]));
+                        
+                        plot_ui.line(egui_plot::Line::new(egui_plot::PlotPoints::from_iter(values)).color(*colour));
                     }
                 }
             });
@@ -208,10 +202,11 @@ fn main() {
 
     // Launch the application window
     eframe::run_native(
-        Box::new(app),
+        "Thermometer Data",
         eframe::NativeOptions {
-            maximized: true,
             ..Default::default()
         },
-    );
+        Box::new(|_cc|{
+            Ok(Box::<ThermometerApp>::from(app))
+        })).unwrap();
 }
