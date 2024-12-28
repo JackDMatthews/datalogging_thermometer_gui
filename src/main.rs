@@ -72,6 +72,7 @@ impl ThermometerApp {
         for (channel, data_str) in channels.iter_mut().zip(split_data.take(NUM_CHANNELS)) {
             if data_str.is_empty() {
                 channel.data.push((time, None));
+                continue;
             }
             // convert the data to f64 while removing the last character (which is C for celsius)
             let value = data_str.trim_end_matches('C').parse::<f64>().unwrap();
