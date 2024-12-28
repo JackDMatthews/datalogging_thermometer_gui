@@ -145,10 +145,15 @@ impl eframe::App for ThermometerApp {
             plot.show(ui, |plot_ui| {
                 for Channel{ enabled, colour, data} in channels.iter() {
                     if *enabled {
-                        // Filter out times with `None` temps, also format into egui::plot::Values 
-                        let values = data.iter().filter_map(|&(time, opt_temp)| opt_temp.map(|t| [time as f64, t]));
-                        
-                        plot_ui.line(egui_plot::Line::new(egui_plot::PlotPoints::from_iter(values)).color(*colour));
+                        // Filter out times with `None` temps
+                        let all_points: Vec<[f64;2]> = data.iter().filter_map(|&(time, opt_temp)| opt_temp.map(|t| [time as f64, t])).collect();
+
+                        // If we have many values only plot some of them
+                        let points_per_pixel = (all_points.len() as f32 / window_size.x+0.01).round() as usize;
+                        let plotted_points = if points_per_pixel < 2 { all_points }
+                        else { all_points.into_iter().step_by(points_per_pixel).collect() };
+
+                        plot_ui.line(egui_plot::Line::new(egui_plot::PlotPoints::from(plotted_points)).color(*colour));
                     }
                 }
             });
@@ -169,6 +174,19 @@ fn main() {
         egui::Color32::GRAY
     ];
     
+    /*let dummy_data_points = vec![
+        SerialDataPoint {
+            time: 0,
+            temperature: vec![15.0, 15.4, 14.9, 15.2, 15.5, 15.7, 15.6, 15.78],
+            time_received: "2024-12-11 12:00:00.000".to_string(),
+        },
+        SerialDataPoint {
+            time: 125,
+            temperature: vec![16.0, 16.1, 15.96, 16.13, 16.04 , 15.98, 16.02, 16.1],
+            time_received: "2024-12-11 12:00:00.125".to_string(),
+        },
+        ];
+    */
     const NUM_EXAMPLES: usize = 100_000;
     let channels: [Channel; NUM_CHANNELS] = std::array::from_fn(|i| Channel{ 
         data: std::array::from_fn::<_, NUM_EXAMPLES,_>( |j| 
@@ -177,9 +195,10 @@ fn main() {
         enabled: true, 
         colour: DEFAULT_LINE_COLOURS[i] }); 
 
+    let timestamp_examples = std::iter::repeat((0, String::from("ABCD"))).take(NUM_EXAMPLES).collect();
     let app = ThermometerApp {
         channels: Arc::new(Mutex::new(channels)),
-        timestamp_datetime: Arc::new(Mutex::new(vec![])),
+        timestamp_datetime: Arc::new(Mutex::new(timestamp_examples)),
     };
 
     // thread to add data
