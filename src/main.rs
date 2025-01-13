@@ -1,5 +1,5 @@
 use eframe::{egui, epi};
-use std::{io, sync::{Arc, Mutex}, thread};
+use std::{sync::{Arc, Mutex}, thread};
 
 const NUM_CHANNELS: usize = 8;
 const AUTOSAVE_SECONDS_INTERVAL: u64 = 60;
@@ -16,6 +16,8 @@ struct ThermometerApp{
     data : Arc<Mutex<Vec<SerialDataPoint>>>, // data from the serial port
     checked: Arc<Mutex<Vec<bool>>>, // whether the data for each channel is plotted
     colours: Arc<Mutex<Vec<[f32; 3]>>>, // line colours for each channel
+    port_names: Vec<String>, // list of available serial ports
+    selected_port_name: Arc<Mutex<String>>, // selected serial port
 }
 
 impl ThermometerApp {
@@ -44,14 +46,52 @@ impl ThermometerApp {
         writer.flush().unwrap();
         println!("Data saved to .CSV file");
     }
+    
+    fn read_input_from_serial(&self) {
+        println!("Available serial ports: {:?}", self.port_names);
 
-    fn read_input_from_cmd(&self) {
-        println!("Please enter new data (comma separated): ");
-        let mut input = String::new();
-        io::stdin().read_line(&mut input).expect("Input should be read in from the command line");
-        let input = input.trim();
-        self.append_data(input);
+        loop {
+            println!("self.selected_port_name: {:?}", self.selected_port_name);
+            if self.selected_port_name.lock().unwrap().is_empty() {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+            else{
+                break;
+            }
+        }
+
+        let port_name = self.selected_port_name.lock().unwrap().clone();
+
+        let mut port = serialport::new(port_name, 9600)
+            .timeout(std::time::Duration::from_secs(1))
+            .open()
+            .expect("Failed to open serial port");
+
+        let mut serial_buf = String::new();
+
+        loop {
+            let mut buf: Vec<u8> = vec![0; 100];
+            match port.read(buf.as_mut_slice()) {
+                Ok(t) => {
+                    if t == 0 {
+                        continue;
+                    }
+                    let s = String::from_utf8_lossy(&buf[..t]);
+                    serial_buf.push_str(&s);
+                    while let Some(pos) = serial_buf.find("\r") {
+                        let line = serial_buf[..pos].to_string();
+                        self.append_data(&line);
+                        serial_buf = serial_buf[pos + 1..].to_string();
+                    }
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => (),
+                Err(e) => eprintln!("Error reading from serial port: {}", e),
+            }
+        }
+
     }
+
+
 
     fn append_data (&self, new_data: &str) {
         // first check if str is an info string
@@ -111,6 +151,19 @@ impl epi::App for ThermometerApp {
 
         // Create the UI
         egui::CentralPanel::default().show(ctx, |ui| {
+
+        
+            let selected_port_name = self.selected_port_name.lock().unwrap().clone();
+            egui::ComboBox::from_label("Select the serial port to read data from")
+                .selected_text(&selected_port_name)
+                .show_ui(ui, |ui| {
+                    for port in &self.port_names {
+                        if ui.selectable_label(selected_port_name == *port, port).clicked() {
+                            *self.selected_port_name.lock().unwrap() = port.clone();
+                        }
+                    }
+                });
+    
             ui.heading("Current Temperature Data");
 
             //get window size
@@ -214,18 +267,27 @@ fn main() {
         },
         ];
     
+
+
+    let ports = serialport::available_ports().unwrap();
+    let mut port_names = Vec::new();
+    for port in ports {
+        port_names.push(port.port_name);
+    }
+
     let app = ThermometerApp {
         data: Arc::new(Mutex::new(dummy_data_points)),
         checked: Arc::new(Mutex::new(vec![true; NUM_CHANNELS])),
         colours: Arc::new(Mutex::new(default_line_colours)),
+        port_names,
+        selected_port_name: Arc::new(Mutex::new("".to_string())),
     };
 
     // thread to add data
     let app_read_in = app.clone();
     thread::spawn(move || {
-        loop {
-            app_read_in.read_input_from_cmd();
-        }
+        // app_read_in.read_input_from_cmd();
+        app_read_in.read_input_from_serial();
     });
 
     // thread to autosave data
