@@ -1,5 +1,5 @@
 use eframe::egui;
-use std::{io, sync::{Arc, Mutex}, thread};
+use std::{sync::{Arc, Mutex}, thread};
 
 const NUM_CHANNELS: usize = 8;
 const AUTOSAVE_SECONDS_INTERVAL: u64 = 60;
@@ -48,6 +48,7 @@ impl ThermometerApp {
         println!("Data saved to .CSV file");
     }
     
+    // TODO: Make safe from panics. This is called from a different thread so the application will just keep going.
     fn read_input_from_serial(&self) {
         println!("Available serial ports: {:?}", self.port_names);
 
@@ -91,8 +92,6 @@ impl ThermometerApp {
         }
 
     }
-
-
 
     fn append_data (&self, new_data: &str) {
         // first check if str is an info string
@@ -227,31 +226,17 @@ fn main() {
         egui::Color32::WHITE,
         egui::Color32::GRAY
     ];
-    
-    /*let dummy_data_points = vec![
-        SerialDataPoint {
-            time: 0,
-            temperature: vec![15.0, 15.4, 14.9, 15.2, 15.5, 15.7, 15.6, 15.78],
-            time_received: "2024-12-11 12:00:00.000".to_string(),
-        },
-        SerialDataPoint {
-            time: 125,
-            temperature: vec![16.0, 16.1, 15.96, 16.13, 16.04 , 15.98, 16.02, 16.1],
-            time_received: "2024-12-11 12:00:00.125".to_string(),
-        },
-        ];
-    */
+
     const NUM_EXAMPLES: usize = 100_000;
     let channels: [Channel; NUM_CHANNELS] = std::array::from_fn(|i| Channel{ 
+        // Some dummy data for testing lots of points
         data: std::array::from_fn::<_, NUM_EXAMPLES,_>( |j| 
             (j as u64, Some(f64::sin(j as f64 / 3000.0 + (i*20) as f64) // Nice sine wave example, each channel offset by 20 radians
          ))).to_vec(), 
         enabled: true, 
         colour: DEFAULT_LINE_COLOURS[i] }); 
 
-    let timestamp_examples = std::iter::repeat((0, String::from("ABCD"))).take(NUM_EXAMPLES).collect();
-    
-
+    let timestamp_examples = std::iter::repeat_n((0, String::from("ABCD")), NUM_EXAMPLES).collect();
 
     let ports = serialport::available_ports().unwrap();
     let mut port_names = Vec::new();
