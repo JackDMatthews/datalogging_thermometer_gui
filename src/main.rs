@@ -1,26 +1,25 @@
-use eframe::{egui, epi};
-use std::{sync::{Arc, Mutex}, thread};
+use eframe::egui;
+use std::{io, sync::{Arc, Mutex}, thread};
 
 const NUM_CHANNELS: usize = 8;
 const AUTOSAVE_SECONDS_INTERVAL: u64 = 60;
 
 #[derive(Clone)]
-struct SerialDataPoint{
-    time: u64, // time since thermometer start, in ms
-    temperature: Vec<f32>, // temperature of each sensorm, stored in vector 
-    time_received: String, //datetime of data received
+struct Channel {
+    data: Vec<(u64, Option<f64>)>, // (Timestamp, temperature)
+    enabled: bool,
+    colour: egui::Color32,
 }
-
 #[derive(Clone)]
 struct ThermometerApp{
-    data : Arc<Mutex<Vec<SerialDataPoint>>>, // data from the serial port
-    checked: Arc<Mutex<Vec<bool>>>, // whether the data for each channel is plotted
-    colours: Arc<Mutex<Vec<[f32; 3]>>>, // line colours for each channel
+    channels : Arc<Mutex< [Channel; NUM_CHANNELS] >>, // data from the serial port
+    timestamp_datetime: Arc<Mutex< Vec<(u64, String)> >>, // timestamp and equivalent datetime
     port_names: Vec<String>, // list of available serial ports
     selected_port_name: Arc<Mutex<String>>, // selected serial port
 }
 
 impl ThermometerApp {
+    // TODO: Make safe from panics. This is called from a different thread so the application will just keep going.
     fn save_to_csv(&self) {
         // write the data to a .csv file
         let current_time = chrono::Local::now().format("%Y-%m-%d %H-%M-%S").to_string();
@@ -29,20 +28,22 @@ impl ThermometerApp {
 
         let sensor_headers: Vec<String> = (1..=NUM_CHANNELS).map(|i| format!("Sensor {}", i)).collect();
 
-        let mut headers = vec!["datetime of data", "Time since start (ms)"];
+        let mut headers = vec!["Time since start (ms)", "datetime of data"];
         headers.extend(sensor_headers.iter().map(|s| s.as_str()));
         writer.write_record(&headers).unwrap();
 
-        let data = self.data.lock().unwrap();
-        
-        for data_point in data.iter() {
-            let mut record = vec![data_point.time_received.clone()];
-            record.push(data_point.time.to_string());
-            for temp in &data_point.temperature {
-                record.push(temp.to_string());
+        let channels: &[Channel; NUM_CHANNELS] = &self.channels.lock().unwrap();
+        let timestamp_datetime = &self.timestamp_datetime.lock().unwrap();
+
+        for (i, (timestamp, datetime)) in timestamp_datetime.iter().enumerate() {
+            let mut record = vec![timestamp.to_string(), datetime.to_string()];
+            for channel in channels {
+                let tempr: String = channel.data[i].1.map(|t| t.to_string()).unwrap_or_else(String::new);
+                record.push(tempr)
             }
             writer.write_record(&record).unwrap();
         }
+        
         writer.flush().unwrap();
         println!("Data saved to .CSV file");
     }
@@ -102,31 +103,24 @@ impl ThermometerApp {
         }
 
         // split the incoming data by commas
-        let split_data: Vec<&str> = new_data.split(',').collect();
+        let mut split_data = new_data.split(',');
 
-        let time = split_data[0].parse::<u64>().unwrap();
+        let time = split_data.next().unwrap().parse::<u64>().unwrap();
         let datetime_received = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string();
 
-        let mut temperatures = Vec::new();
-
-        for &data_str in split_data.iter().skip(1).take(8) {
+        let mut channels = self.channels.lock().unwrap();
+        for (channel, data_str) in channels.iter_mut().zip(split_data.take(NUM_CHANNELS)) {
             if data_str.is_empty() {
-                temperatures.push(f32::NAN);
+                channel.data.push((time, None));
                 continue;
             }
-            // convert the data to f32 while removing the last character (which is C for celsius)
-            let value = data_str.trim_end_matches('C').parse::<f32>().unwrap();
-            temperatures.push(value);
+            // convert the data to f64 while removing the last character (which is C for celsius)
+            let value = data_str.trim_end_matches('C').parse::<f64>().unwrap();
+            channel.data.push((time, Some(value)));
         }
 
-        let new_data_point = SerialDataPoint {
-            time,
-            temperature: temperatures,
-            time_received: datetime_received,
-        };
-
-        let mut data = self.data.lock().unwrap();
-        data.push(new_data_point);
+        let mut timestamp_to_datetime = self.timestamp_datetime.lock().unwrap();
+        timestamp_to_datetime.push((time, datetime_received));
     }
 
 
@@ -137,18 +131,10 @@ impl ThermometerApp {
 }
 
 
-impl epi::App for ThermometerApp {
-
-    fn name(&self) -> &str {
-        "Thermometer Data"
-    }
-    
-
-    fn update(&mut self, ctx: &egui::Context, _frame: &epi::Frame) {
+impl eframe::App for ThermometerApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint(); // Request regular updates for real-time changes
-
         
-
         // Create the UI
         egui::CentralPanel::default().show(ctx, |ui| {
 
@@ -165,73 +151,63 @@ impl epi::App for ThermometerApp {
                 });
     
             ui.heading("Current Temperature Data");
-
+            
             //get window size
             let window_size = ui.available_size_before_wrap();
 
-            let data_points = self.data.lock().unwrap().clone();
-
+            let channels: &mut [Channel; NUM_CHANNELS] = &mut self.channels.lock().unwrap();
             // plot grid of values (2x4)
             egui::Grid::new("current_data_grid").show(ui, |ui| {
-                let latest_data_point = data_points.last().unwrap();
-                for row in 0..2 {
-                    for col in 0..4 {
+                const NUM_COLS: usize = 4;
+                for (index, Channel{ data, enabled, colour }) in channels.iter_mut().enumerate() {
+                    let temp = data.iter().last().map(|(_time, temp)| temp);
+                    ui.group(|ui| {
+                        ui.set_width(window_size.x * 0.25 - 6.0 * 3.0);
 
-                        let index = row * 4 + col;
-                        let current_sensor_temp = latest_data_point.temperature.get(index).unwrap();
-                        let mut checked = self.checked.lock().unwrap();
-                        let mut colours = self.colours.lock().unwrap();
-
-                        ui.group(|ui| {
-                            ui.set_width(window_size.x * 0.25 - 6.0 * 3.0);
-
-                            ui.horizontal(|ui| {
-                                ui.label(format!("Sensor {}: ", index+1));
-                                if current_sensor_temp.is_nan() {
-                                    ui.label("No data");
-                                } else {
-                                    ui.label(egui::RichText::new(format!("{:6.3}°C", current_sensor_temp)).strong());
-                                }
-                            });    
-                            
-                            ui.with_layout(egui::Layout::right_to_left(), |ui| {
-                                ui.checkbox(&mut checked[index], "");
-                                ui.color_edit_button_rgb(&mut colours[index]);
-                            });
+                        ui.horizontal(|ui| {
+                            ui.label(format!("Sensor {}: ", index+1));
+                            match temp {
+                                Some(Some(f)) => ui.label(egui::RichText::new(format!("{:6.3}°C", f)).strong()),
+                                _ => ui.label("No data"),
+                            }
+                        });    
+                        
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.checkbox(enabled, "");
+                            ui.color_edit_button_srgba(colour);
                         });
-
+                    });
+                    if (index+1) % NUM_COLS == 0 {
+                        ui.end_row();
                     }
-                    ui.end_row();
                 }
             });
             
             // Save data to .CSV file on button press
             if ui.button("Save Data").on_hover_text("Save the current data to a .CSV file (YMD HMS for alphabetical sorting)").clicked() {
-                self.save_to_csv();
+                let save_thread = self.clone();
+                thread::spawn(move || {
+                    save_thread.save_to_csv();
+                });
             }
 
             ui.separator();
 
             ui.heading("Temperature Data Plot");
 
-
-            let plot = egui::plot::Plot::new("data_plot");
+            let plot = egui_plot::Plot::new("data_plot");
             plot.show(ui, |plot_ui| {
-                let checked = self.checked.lock().unwrap();
-                let colours = self.colours.lock().unwrap();
-                
-                for i in 0..8 {
-                    if checked[i] {
-                        let color = egui::Color32::from_rgb(
-                            (255.0 * colours[i][0]) as u8,
-                            (255.0 * colours[i][1]) as u8,
-                            (255.0 * colours[i][2]) as u8,
-                        );
-                        let times = data_points.iter().map(|d| d.time as f64).collect::<Vec<f64>>();
-                        let temperatures = data_points.iter().map(|d| d.temperature[i] as f64).collect::<Vec<f64>>();
-                        let values: Vec<egui::plot::Value> = times.iter().zip(temperatures.iter()).map(|(&t, &temp)| egui::plot::Value::new(t, temp)).collect();
+                for Channel{ enabled, colour, data} in channels.iter() {
+                    if *enabled {
+                        // Filter out times with `None` temps
+                        let all_points: Vec<[f64;2]> = data.iter().filter_map(|&(time, opt_temp)| opt_temp.map(|t| [time as f64, t])).collect();
 
-                        plot_ui.line(egui::plot::Line::new(egui::plot::Values::from_values(values)).color(color));
+                        // If we have many values only plot some of them
+                        let points_per_pixel = (all_points.len() as f32 / window_size.x+0.01).round() as usize;
+                        let plotted_points = if points_per_pixel < 2 { all_points }
+                        else { all_points.into_iter().step_by(points_per_pixel).collect() };
+
+                        plot_ui.line(egui_plot::Line::new(egui_plot::PlotPoints::from(plotted_points)).color(*colour));
                     }
                 }
             });
@@ -240,21 +216,19 @@ impl epi::App for ThermometerApp {
 }
 
 fn main() {
-
     // Default line colours for the plot
-    let default_line_colours = vec![
-        [1.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0],
-        [0.0, 0.0, 1.0],
-        [1.0, 1.0, 0.0],
-        [1.0, 0.0, 1.0],
-        [0.0, 1.0, 1.0],
-        [1.0, 1.0, 1.0],
-        [0.5, 0.5, 0.5],
+    const DEFAULT_LINE_COLOURS: [eframe::egui::Color32; 8] = [
+        egui::Color32::RED,
+        egui::Color32::GREEN,
+        egui::Color32::BLUE,
+        egui::Color32::YELLOW,
+        egui::Color32::from_rgba_premultiplied(255, 0, 255, 255), // magenta
+        egui::Color32::from_rgba_premultiplied(0, 255, 255, 255), // cyan
+        egui::Color32::WHITE,
+        egui::Color32::GRAY
     ];
-
     
-    let dummy_data_points = vec![
+    /*let dummy_data_points = vec![
         SerialDataPoint {
             time: 0,
             temperature: vec![15.0, 15.4, 14.9, 15.2, 15.5, 15.7, 15.6, 15.78],
@@ -266,6 +240,16 @@ fn main() {
             time_received: "2024-12-11 12:00:00.125".to_string(),
         },
         ];
+    */
+    const NUM_EXAMPLES: usize = 100_000;
+    let channels: [Channel; NUM_CHANNELS] = std::array::from_fn(|i| Channel{ 
+        data: std::array::from_fn::<_, NUM_EXAMPLES,_>( |j| 
+            (j as u64, Some(f64::sin(j as f64 / 3000.0 + (i*20) as f64) // Nice sine wave example, each channel offset by 20 radians
+         ))).to_vec(), 
+        enabled: true, 
+        colour: DEFAULT_LINE_COLOURS[i] }); 
+
+    let timestamp_examples = std::iter::repeat((0, String::from("ABCD"))).take(NUM_EXAMPLES).collect();
     
 
 
@@ -276,9 +260,8 @@ fn main() {
     }
 
     let app = ThermometerApp {
-        data: Arc::new(Mutex::new(dummy_data_points)),
-        checked: Arc::new(Mutex::new(vec![true; NUM_CHANNELS])),
-        colours: Arc::new(Mutex::new(default_line_colours)),
+        channels: Arc::new(Mutex::new(channels)),
+        timestamp_datetime: Arc::new(Mutex::new(timestamp_examples)),
         port_names,
         selected_port_name: Arc::new(Mutex::new("".to_string())),
     };
@@ -302,10 +285,11 @@ fn main() {
 
     // Launch the application window
     eframe::run_native(
-        Box::new(app),
+        "Thermometer Data",
         eframe::NativeOptions {
-            maximized: true,
             ..Default::default()
         },
-    );
+        Box::new(|_cc|{
+            Ok(Box::<ThermometerApp>::from(app))
+        })).unwrap();
 }
